@@ -23,6 +23,10 @@
 						},
 						"queryTimeout": "02:00:00",
 						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "AzureSqlTable1",
+						"type": "DatasetReference"
 					}
 				}
 			},
@@ -64,8 +68,22 @@
 							"type": "ParquetWriteSettings"
 						}
 					},
-					"enableStaging": false
+					"enableStaging": false,
+					"translator": {
+						"type": "TabularTranslator",
+						"typeConversion": true,
+						"typeConversionSettings": {
+							"allowDataTruncation": true,
+							"treatBooleanAsNumber": false
+						}
+					}
 				},
+				"inputs": [
+					{
+						"referenceName": "AzureSqlTable1",
+						"type": "DatasetReference"
+					}
+				],
 				"outputs": [
 					{
 						"referenceName": "DS_Parquet_Incremental_Dynamic",
@@ -145,6 +163,10 @@
 										"type": "Expression"
 									}
 								}
+							},
+							"linkedServiceName": {
+								"referenceName": "AzureDatabricks1",
+								"type": "LinkedServiceReference"
 							}
 						}
 					]
@@ -170,7 +192,7 @@
 				},
 				"userProperties": [],
 				"typeProperties": {
-					"storedProcedureName": "[control].[usp_UpdateLoadStatus]",
+					"storedProcedureName": "[control].[sp_GetCDCChanges_CompositeKey]",
 					"storedProcedureParameters": {
 						"table_id": {
 							"value": {
@@ -191,6 +213,10 @@
 							"type": "Int64"
 						}
 					}
+				},
+				"linkedServiceName": {
+					"referenceName": "AzureSqlDatabase1",
+					"type": "LinkedServiceReference"
 				}
 			}
 		],
