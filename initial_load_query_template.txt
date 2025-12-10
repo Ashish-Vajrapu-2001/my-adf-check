@@ -1,0 +1,7 @@
+@concat(
+    'SELECT *, ',
+    'CHANGE_TRACKING_CURRENT_VERSION() as _sync_version, ',
+    '''', pipeline().parameters.source_system_id, ''' as _source_system_id, ',
+    '''', pipeline().parameters.table_id, ''' as _table_id ',
+    'FROM [', pipeline().parameters.schema_name, '].[', pipeline().parameters.table_name, ']'
+)

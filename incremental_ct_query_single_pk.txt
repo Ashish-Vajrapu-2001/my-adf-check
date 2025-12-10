@@ -1,0 +1,16 @@
+@concat(
+    'DECLARE @last_sync_version BIGINT = ', activity('Lookup Last Sync Version').output.firstRow.last_sync_version, '; ',
+    'DECLARE @current_version BIGINT = CHANGE_TRACKING_CURRENT_VERSION(); ',
+    'SELECT ',
+    '    CT.SYS_CHANGE_OPERATION, ',
+    '    CT.SYS_CHANGE_VERSION, ',
+    '    T.*, ',
+    '    @current_version as _current_sync_version ',
+    'FROM CHANGETABLE(CHANGES [', pipeline().parameters.schema_name, '].[',
+                                  pipeline().parameters.table_name, '], @last_sync_version) AS CT ',
+    'LEFT JOIN [', pipeline().parameters.schema_name, '].[',
+                   pipeline().parameters.table_name, '] AS T ',
+    '    ON CT.[', pipeline().parameters.primary_key_columns, '] = T.[',
+                   pipeline().parameters.primary_key_columns, '] ',
+    'WHERE CT.SYS_CHANGE_VERSION <= @current_version'
+)

@@ -1,0 +1,179 @@
+{
+    "name": "PL_Master_Orchestrator",
+    "properties": {
+        "activities": [
+            {
+                "name": "Get Table Metadata",
+                "type": "Lookup",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": "SELECT * FROM control.table_metadata WHERE is_active = 1",
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "dataset": {
+                        "referenceName": "DS_AzureSQL_Dynamic",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "sourceSystemId": "control_db",
+                            "schemaName": "control",
+                            "tableName": "table_metadata"
+                        }
+                    },
+                    "firstRowOnly": false
+                }
+            },
+            {
+                "name": "Filter Tables",
+                "type": "Filter",
+                "dependsOn": [
+                    {
+                        "activity": "Get Table Metadata",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "items": {
+                        "value": "@activity('Get Table Metadata').output.value",
+                        "type": "Expression"
+                    },
+                    "condition": {
+                        "value": "@or(equals(pipeline().parameters.load_mode, 'both'), or(and(equals(pipeline().parameters.load_mode, 'initial'), equals(item().initial_load_completed, 0)), and(equals(pipeline().parameters.load_mode, 'incremental'), equals(item().initial_load_completed, 1))))",
+                        "type": "Expression"
+                    }
+                }
+            },
+            {
+                "name": "ForEach Table",
+                "type": "ForEach",
+                "dependsOn": [
+                    {
+                        "activity": "Filter Tables",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "userProperties": [],
+                "typeProperties": {
+                    "items": {
+                        "value": "@activity('Filter Tables').output.value",
+                        "type": "Expression"
+                    },
+                    "isSequential": false,
+                    "batchCount": {
+                        "value": "@pipeline().parameters.parallel_execution_count",
+                        "type": "Expression"
+                    },
+                    "activities": [
+                        {
+                            "name": "Check Load Mode",
+                            "type": "IfCondition",
+                            "dependsOn": [],
+                            "userProperties": [],
+                            "typeProperties": {
+                                "expression": {
+                                    "value": "@or(equals(pipeline().parameters.load_mode, 'initial'), equals(item().initial_load_completed, 0))",
+                                    "type": "Expression"
+                                },
+                                "ifTrueActivities": [
+                                    {
+                                        "name": "Execute Initial Load",
+                                        "type": "ExecutePipeline",
+                                        "dependsOn": [],
+                                        "userProperties": [],
+                                        "typeProperties": {
+                                            "pipeline": {
+                                                "referenceName": "PL_Initial_Load_Single_Table",
+                                                "type": "PipelineReference"
+                                            },
+                                            "waitOnCompletion": true,
+                                            "parameters": {
+                                                "table_id": {
+                                                    "value": "@item().table_id",
+                                                    "type": "Expression"
+                                                },
+                                                "source_system_id": {
+                                                    "value": "@item().source_system_id",
+                                                    "type": "Expression"
+                                                },
+                                                "schema_name": {
+                                                    "value": "@item().schema_name",
+                                                    "type": "Expression"
+                                                },
+                                                "table_name": {
+                                                    "value": "@item().table_name",
+                                                    "type": "Expression"
+                                                },
+                                                "primary_key_columns": {
+                                                    "value": "@item().primary_key_columns",
+                                                    "type": "Expression"
+                                                },
+                                                "is_composite_key": {
+                                                    "value": "@item().is_composite_key",
+                                                    "type": "Expression"
+                                                },
+                                                "bronze_base_path": {
+                                                    "value": "@item().bronze_base_path",
+                                                    "type": "Expression"
+                                                }
+                                            }
+                                        }
+                                    }
+                                ],
+                                "ifFalseActivities": [
+                                    {
+                                        "name": "Execute Incremental Load",
+                                        "type": "ExecutePipeline",
+                                        "dependsOn": [],
+                                        "userProperties": [],
+                                        "typeProperties": {
+                                            "pipeline": {
+                                                "referenceName": "PL_Incremental_CDC_Single_Table",
+                                                "type": "PipelineReference"
+                                            },
+                                            "waitOnCompletion": true,
+                                            "parameters": {
+                                                "table_id": {
+                                                    "value": "@item().table_id",
+                                                    "type": "Expression"
+                                                }
+                                            }
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        ],
+        "parameters": {
+            "load_mode": {
+                "type": "string",
+                "defaultValue": "both"
+            },
+            "parallel_execution_count": {
+                "type": "int",
+                "defaultValue": 5
+            }
+        },
+        "folder": {
+            "name": "Orchestration"
+        },
+        "annotations": []
+    }
+}

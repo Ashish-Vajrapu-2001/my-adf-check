@@ -1,0 +1,34 @@
+{
+    "name": "DS_Parquet_Incremental_Dynamic",
+    "properties": {
+        "linkedServiceName": {
+            "referenceName": "LS_AzureDataLakeStorage",
+            "type": "LinkedServiceReference"
+        },
+        "parameters": {
+            "sourceSystemName": {
+                "type": "string"
+            },
+            "schemaName": {
+                "type": "string"
+            },
+            "tableName": {
+                "type": "string"
+            }
+        },
+        "annotations": [],
+        "type": "Parquet",
+        "typeProperties": {
+            "location": {
+                "type": "AzureBlobFSLocation",
+                "folderPath": {
+                    "value": "@concat(dataset().sourceSystemName, '/', dataset().schemaName, '/', dataset().tableName, '/incremental/', formatDateTime(utcnow(), 'yyyy-MM-dd-HHmmss'))",
+                    "type": "Expression"
+                },
+                "fileSystem": "bronze"
+            },
+            "compressionCodec": "snappy"
+        },
+        "schema": []
+    }
+}

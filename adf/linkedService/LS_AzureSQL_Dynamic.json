@@ -1,0 +1,24 @@
+{
+    "name": "LS_AzureSQL_Dynamic",
+    "properties": {
+        "type": "AzureSqlDatabase",
+        "parameters": {
+            "sourceSystemId": {
+                "type": "string"
+            }
+        },
+        "typeProperties": {
+            "connectionString": {
+                "type": "AzureKeyVaultSecret",
+                "store": {
+                    "referenceName": "LS_KeyVault",
+                    "type": "LinkedServiceReference"
+                },
+                "secretName": {
+                    "value": "@concat('sql-connection-', linkedService().sourceSystemId)",
+                    "type": "Expression"
+                }
+            }
+        }
+    }
+}

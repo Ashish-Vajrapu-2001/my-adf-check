@@ -1,0 +1,280 @@
+{
+    "name": "PL_Initial_Load_Single_Table",
+    "properties": {
+        "activities": [
+            {
+                "name": "Lookup Table Details",
+                "type": "Lookup",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": {
+                            "value": "SELECT * FROM control.table_metadata WHERE table_id = '@{pipeline().parameters.table_id}'",
+                            "type": "Expression"
+                        },
+                        "partitionOption": "None"
+                    },
+                    "dataset": {
+                        "referenceName": "DS_AzureSQL_Dynamic",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "sourceSystemId": "control_db",
+                            "schemaName": "control",
+                            "tableName": "table_metadata"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "Copy Data To Bronze",
+                "type": "Copy",
+                "dependsOn": [
+                    {
+                        "activity": "Lookup Table Details",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 3,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": {
+                            "value": "@concat(\n    'SELECT *, ',\n    'CHANGE_TRACKING_CURRENT_VERSION() as _sync_version, ',\n    '''', pipeline().parameters.source_system_id, ''' as _source_system_id, ',\n    '''', pipeline().parameters.table_id, ''' as _table_id ',\n    'FROM [', pipeline().parameters.schema_name, '].[', pipeline().parameters.table_name, ']'\n)",
+                            "type": "Expression"
+                        },
+                        "partitionOption": "None"
+                    },
+                    "sink": {
+                        "type": "ParquetSink",
+                        "storeSettings": {
+                            "type": "AzureBlobFSWriteSettings"
+                        },
+                        "formatSettings": {
+                            "type": "ParquetWriteSettings"
+                        }
+                    },
+                    "enableStaging": false
+                },
+                "inputs": [
+                    {
+                        "referenceName": "DS_AzureSQL_Dynamic",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "sourceSystemId": {
+                                "value": "@pipeline().parameters.source_system_id",
+                                "type": "Expression"
+                            },
+                            "schemaName": {
+                                "value": "@pipeline().parameters.schema_name",
+                                "type": "Expression"
+                            },
+                            "tableName": {
+                                "value": "@pipeline().parameters.table_name",
+                                "type": "Expression"
+                            }
+                        }
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "DS_Parquet_Bronze_Dynamic",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "sourceSystemName": {
+                                "value": "@pipeline().parameters.source_system_id",
+                                "type": "Expression"
+                            },
+                            "schemaName": {
+                                "value": "@pipeline().parameters.schema_name",
+                                "type": "Expression"
+                            },
+                            "tableName": {
+                                "value": "@pipeline().parameters.table_name",
+                                "type": "Expression"
+                            }
+                        }
+                    }
+                ]
+            },
+            {
+                "name": "Process Bronze to Silver",
+                "type": "DatabricksNotebook",
+                "dependsOn": [
+                    {
+                        "activity": "Copy Data To Bronze",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "notebookPath": "/Initial_Load_Dynamic",
+                    "baseParameters": {
+                        "table_id": {
+                            "value": "@pipeline().parameters.table_id",
+                            "type": "Expression"
+                        },
+                        "source_system_id": {
+                            "value": "@pipeline().parameters.source_system_id",
+                            "type": "Expression"
+                        },
+                        "schema_name": {
+                            "value": "@pipeline().parameters.schema_name",
+                            "type": "Expression"
+                        },
+                        "table_name": {
+                            "value": "@pipeline().parameters.table_name",
+                            "type": "Expression"
+                        },
+                        "primary_key_columns": {
+                            "value": "@pipeline().parameters.primary_key_columns",
+                            "type": "Expression"
+                        },
+                        "bronze_base_path": {
+                            "value": "@pipeline().parameters.bronze_base_path",
+                            "type": "Expression"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "LS_AzureDatabricks",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "Update Metadata Success",
+                "type": "SqlServerStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "Process Bronze to Silver",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "[control].[usp_update_table_metadata]",
+                    "storedProcedureParameters": {
+                        "table_id": {
+                            "value": "@pipeline().parameters.table_id",
+                            "type": "String"
+                        },
+                        "initial_load_completed": {
+                            "value": "1",
+                            "type": "Int32"
+                        },
+                        "last_sync_version": {
+                            "value": {
+                                "value": "@activity('Lookup Table Details').output.firstRow.current_version_placeholder",
+                                "type": "Expression"
+                            },
+                            "type": "Int64"
+                        },
+                        "last_load_status": {
+                            "value": "success",
+                            "type": "String"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "LS_AzureSQL_Control",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "Update Metadata Failed",
+                "type": "SqlServerStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "Copy Data To Bronze",
+                        "dependencyConditions": [
+                            "Failed"
+                        ]
+                    },
+                    {
+                        "activity": "Process Bronze to Silver",
+                        "dependencyConditions": [
+                            "Failed"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "[control].[usp_update_table_metadata]",
+                    "storedProcedureParameters": {
+                        "table_id": {
+                            "value": "@pipeline().parameters.table_id",
+                            "type": "String"
+                        },
+                        "last_load_status": {
+                            "value": "failed",
+                            "type": "String"
+                        },
+                        "last_error_message": {
+                            "value": "@{coalesce(activity('Copy Data To Bronze')?.error?.message, activity('Process Bronze to Silver')?.error?.message)}",
+                            "type": "String"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "LS_AzureSQL_Control",
+                    "type": "LinkedServiceReference"
+                }
+            }
+        ],
+        "parameters": {
+            "table_id": { "type": "string" },
+            "source_system_id": { "type": "string" },
+            "schema_name": { "type": "string" },
+            "table_name": { "type": "string" },
+            "primary_key_columns": { "type": "string" },
+            "is_composite_key": { "type": "string" },
+            "bronze_base_path": { "type": "string" }
+        },
+        "folder": {
+            "name": "Ingestion"
+        },
+        "annotations": []
+    }
+}
