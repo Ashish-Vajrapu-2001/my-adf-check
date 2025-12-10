@@ -1,241 +1,227 @@
 {
-    "name": "PL_Incremental_CDC_Single_Table",
-    "properties": {
-        "activities": [
-            {
-                "name": "Lookup Last Sync Version",
-                "type": "Lookup",
-                "dependsOn": [],
-                "policy": {
-                    "timeout": "0.12:00:00",
-                    "retry": 0,
-                    "retryIntervalInSeconds": 30,
-                    "secureOutput": false,
-                    "secureInput": false
-                },
-                "userProperties": [],
-                "typeProperties": {
-                    "source": {
-                        "type": "AzureSqlSource",
-                        "sqlReaderQuery": {
-                            "value": "SELECT last_sync_version FROM control.table_metadata WHERE table_id = @{pipeline().parameters.table_id}",
-                            "type": "Expression"
-                        },
-                        "queryTimeout": "02:00:00",
-                        "partitionOption": "None"
-                    },
-                    "dataset": {
-                        "referenceName": "DS_Control_Table",
-                        "type": "DatasetReference"
-                    }
-                }
-            },
-            {
-                "name": "Copy CDC Data",
-                "type": "Copy",
-                "dependsOn": [
-                    {
-                        "activity": "Lookup Last Sync Version",
-                        "dependencyConditions": [
-                            "Succeeded"
-                        ]
-                    }
-                ],
-                "policy": {
-                    "timeout": "0.12:00:00",
-                    "retry": 0,
-                    "retryIntervalInSeconds": 30,
-                    "secureOutput": false,
-                    "secureInput": false
-                },
-                "userProperties": [],
-                "typeProperties": {
-                    "source": {
-                        "type": "AzureSqlSource",
-                        "sqlReaderQuery": {
-                            "value": "@if(\n    pipeline().parameters.is_composite_key,\n    concat(\n        'EXEC control.sp_GetCDCChanges_CompositeKey ',\n        ' @SchemaName = ''', pipeline().parameters.schema_name, ''', ',\n        ' @TableName = ''', pipeline().parameters.table_name, ''', ',\n        ' @PrimaryKeyColumns = ''', pipeline().parameters.primary_key_columns, ''', ',\n        ' @LastSyncVersion = ', activity('Lookup Last Sync Version').output.firstRow.last_sync_version\n    ),\n    concat(\n       'DECLARE @last_sync_version BIGINT = ', activity('Lookup Last Sync Version').output.firstRow.last_sync_version, '; ',\n       'DECLARE @current_version BIGINT = CHANGE_TRACKING_CURRENT_VERSION(); ',\n       'SELECT ',\n       '    CT.SYS_CHANGE_OPERATION, ',\n       '    CT.SYS_CHANGE_VERSION, ',\n       '    T.*, ',\n       '    @current_version as _current_sync_version ',\n       'FROM CHANGETABLE(CHANGES [', pipeline().parameters.schema_name, '].[', \n                                     pipeline().parameters.table_name, '], @last_sync_version) AS CT ',\n       'LEFT JOIN [', pipeline().parameters.schema_name, '].[', \n                      pipeline().parameters.table_name, '] AS T ',\n       '    ON CT.[', pipeline().parameters.primary_key_columns, '] = T.[', \n                      pipeline().parameters.primary_key_columns, '] ',\n       'WHERE CT.SYS_CHANGE_VERSION <= @current_version'\n   )\n)",
-                            "type": "Expression"
-                        },
-                        "queryTimeout": "02:00:00",
-                        "partitionOption": "None"
-                    },
-                    "sink": {
-                        "type": "ParquetSink",
-                        "storeSettings": {
-                            "type": "AzureBlobFSWriteSettings"
-                        },
-                        "formatSettings": {
-                            "type": "ParquetWriteSettings"
-                        }
-                    },
-                    "enableStaging": false
-                },
-                "inputs": [
-                    {
-                        "referenceName": "DS_SQL_Source",
-                        "type": "DatasetReference"
-                    }
-                ],
-                "outputs": [
-                    {
-                        "referenceName": "DS_Parquet_Incremental_Dynamic",
-                        "type": "DatasetReference",
-                        "parameters": {
-                            "sourceSystemName": {
-                                "value": "@pipeline().parameters.source_system_id",
-                                "type": "Expression"
-                            },
-                            "schemaName": {
-                                "value": "@pipeline().parameters.schema_name",
-                                "type": "Expression"
-                            },
-                            "tableName": {
-                                "value": "@pipeline().parameters.table_name",
-                                "type": "Expression"
-                            }
-                        }
-                    }
-                ]
-            },
-            {
-                "name": "Check Changes Found",
-                "type": "IfCondition",
-                "dependsOn": [
-                    {
-                        "activity": "Copy CDC Data",
-                        "dependencyConditions": [
-                            "Succeeded"
-                        ]
-                    }
-                ],
-                "userProperties": [],
-                "typeProperties": {
-                    "expression": {
-                        "value": "@greater(activity('Copy CDC Data').output.rowsCopied, 0)",
-                        "type": "Expression"
-                    },
-                    "ifFalseActivities": [
-                        {
-                            "name": "Log No Changes",
-                            "type": "SetVariable",
-                            "dependsOn": [],
-                            "userProperties": [],
-                            "typeProperties": {
-                                "variableName": "PipelineReturnStatus",
-                                "value": "No changes detected"
-                            }
-                        }
-                    ],
-                    "ifTrueActivities": [
-                        {
-                            "name": "Notebook Incremental Dynamic",
-                            "type": "DatabricksNotebook",
-                            "dependsOn": [],
-                            "policy": {
-                                "timeout": "0.12:00:00",
-                                "retry": 0,
-                                "retryIntervalInSeconds": 30,
-                                "secureOutput": false,
-                                "secureInput": false
-                            },
-                            "userProperties": [],
-                            "typeProperties": {
-                                "notebookPath": "/Shared/Incremental_CDC_Dynamic",
-                                "baseParameters": {
-                                    "table_id": {
-                                        "value": "@pipeline().parameters.table_id",
-                                        "type": "Expression"
-                                    },
-                                    "bronze_path": {
-                                        "value": "@pipeline().parameters.bronze_base_path",
-                                        "type": "Expression"
-                                    }
-                                }
-                            },
-                            "linkedServiceName": {
-                                "referenceName": "LS_Databricks",
-                                "type": "LinkedServiceReference"
-                            }
-                        }
-                    ]
-                }
-            },
-            {
-                "name": "Update Last Sync Version",
-                "type": "SqlServerStoredProcedure",
-                "dependsOn": [
-                    {
-                        "activity": "Check Changes Found",
-                        "dependencyConditions": [
-                            "Succeeded"
-                        ]
-                    }
-                ],
-                "policy": {
-                    "timeout": "0.12:00:00",
-                    "retry": 0,
-                    "retryIntervalInSeconds": 30,
-                    "secureOutput": false,
-                    "secureInput": false
-                },
-                "userProperties": [],
-                "typeProperties": {
-                    "storedProcedureName": "[control].[usp_UpdateLoadStatus]",
-                    "storedProcedureParameters": {
-                        "table_id": {
-                            "value": {
-                                "value": "@pipeline().parameters.table_id",
-                                "type": "Expression"
-                            },
-                            "type": "Int32"
-                        },
-                        "last_load_status": {
-                            "value": "Success",
-                            "type": "String"
-                        },
-                        "rows_copied": {
-                            "value": {
-                                "value": "@activity('Copy CDC Data').output.rowsCopied",
-                                "type": "Expression"
-                            },
-                            "type": "Int64"
-                        }
-                    }
-                },
-                "linkedServiceName": {
-                    "referenceName": "LS_ControlDB",
-                    "type": "LinkedServiceReference"
-                }
-            }
-        ],
-        "parameters": {
-            "table_id": {
-                "type": "int"
-            },
-            "source_system_id": {
-                "type": "string"
-            },
-            "schema_name": {
-                "type": "string"
-            },
-            "table_name": {
-                "type": "string"
-            },
-            "primary_key_columns": {
-                "type": "string"
-            },
-            "is_composite_key": {
-                "type": "bool"
-            },
-            "bronze_base_path": {
-                "type": "string"
-            }
-        },
-        "variables": {
-            "PipelineReturnStatus": {
-                "type": "String"
-            }
-        },
-        "annotations": []
-    }
+	"name": "PL_Incremental_CDC_Single_Table",
+	"properties": {
+		"activities": [
+			{
+				"name": "Lookup Last Sync Version",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT last_sync_version FROM control.table_metadata WHERE table_id = @{pipeline().parameters.table_id}",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					}
+				}
+			},
+			{
+				"name": "Copy CDC Data",
+				"type": "Copy",
+				"dependsOn": [
+					{
+						"activity": "Lookup Last Sync Version",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "@if(\n    pipeline().parameters.is_composite_key,\n    concat(\n        'EXEC control.sp_GetCDCChanges_CompositeKey ',\n        ' @SchemaName = ''', pipeline().parameters.schema_name, ''', ',\n        ' @TableName = ''', pipeline().parameters.table_name, ''', ',\n        ' @PrimaryKeyColumns = ''', pipeline().parameters.primary_key_columns, ''', ',\n        ' @LastSyncVersion = ', activity('Lookup Last Sync Version').output.firstRow.last_sync_version\n    ),\n    concat(\n       'DECLARE @last_sync_version BIGINT = ', activity('Lookup Last Sync Version').output.firstRow.last_sync_version, '; ',\n       'DECLARE @current_version BIGINT = CHANGE_TRACKING_CURRENT_VERSION(); ',\n       'SELECT ',\n       '    CT.SYS_CHANGE_OPERATION, ',\n       '    CT.SYS_CHANGE_VERSION, ',\n       '    T.*, ',\n       '    @current_version as _current_sync_version ',\n       'FROM CHANGETABLE(CHANGES [', pipeline().parameters.schema_name, '].[', \n                                     pipeline().parameters.table_name, '], @last_sync_version) AS CT ',\n       'LEFT JOIN [', pipeline().parameters.schema_name, '].[', \n                      pipeline().parameters.table_name, '] AS T ',\n       '    ON CT.[', pipeline().parameters.primary_key_columns, '] = T.[', \n                      pipeline().parameters.primary_key_columns, '] ',\n       'WHERE CT.SYS_CHANGE_VERSION <= @current_version'\n   )\n)",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"sink": {
+						"type": "ParquetSink",
+						"storeSettings": {
+							"type": "AzureBlobFSWriteSettings"
+						},
+						"formatSettings": {
+							"type": "ParquetWriteSettings"
+						}
+					},
+					"enableStaging": false
+				},
+				"outputs": [
+					{
+						"referenceName": "DS_Parquet_Incremental_Dynamic",
+						"type": "DatasetReference",
+						"parameters": {
+							"sourceSystemName": {
+								"value": "@pipeline().parameters.source_system_id",
+								"type": "Expression"
+							},
+							"schemaName": {
+								"value": "@pipeline().parameters.schema_name",
+								"type": "Expression"
+							},
+							"tableName": {
+								"value": "@pipeline().parameters.table_name",
+								"type": "Expression"
+							}
+						}
+					}
+				]
+			},
+			{
+				"name": "Check Changes Found",
+				"type": "IfCondition",
+				"dependsOn": [
+					{
+						"activity": "Copy CDC Data",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"expression": {
+						"value": "@greater(activity('Copy CDC Data').output.rowsCopied, 0)",
+						"type": "Expression"
+					},
+					"ifFalseActivities": [
+						{
+							"name": "Log No Changes",
+							"type": "SetVariable",
+							"dependsOn": [],
+							"policy": {
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"variableName": "PipelineReturnStatus",
+								"value": "No changes detected"
+							}
+						}
+					],
+					"ifTrueActivities": [
+						{
+							"name": "Notebook Incremental Dynamic",
+							"type": "DatabricksNotebook",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"notebookPath": "/Shared/Incremental_CDC_Dynamic",
+								"baseParameters": {
+									"table_id": {
+										"value": "@pipeline().parameters.table_id",
+										"type": "Expression"
+									},
+									"bronze_path": {
+										"value": "@pipeline().parameters.bronze_base_path",
+										"type": "Expression"
+									}
+								}
+							}
+						}
+					]
+				}
+			},
+			{
+				"name": "Update Last Sync Version",
+				"type": "SqlServerStoredProcedure",
+				"dependsOn": [
+					{
+						"activity": "Check Changes Found",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"storedProcedureName": "[control].[usp_UpdateLoadStatus]",
+					"storedProcedureParameters": {
+						"table_id": {
+							"value": {
+								"value": "@pipeline().parameters.table_id",
+								"type": "Expression"
+							},
+							"type": "Int32"
+						},
+						"last_load_status": {
+							"value": "Success",
+							"type": "String"
+						},
+						"rows_copied": {
+							"value": {
+								"value": "@activity('Copy CDC Data').output.rowsCopied",
+								"type": "Expression"
+							},
+							"type": "Int64"
+						}
+					}
+				}
+			}
+		],
+		"parameters": {
+			"table_id": {
+				"type": "int"
+			},
+			"source_system_id": {
+				"type": "string"
+			},
+			"schema_name": {
+				"type": "string"
+			},
+			"table_name": {
+				"type": "string"
+			},
+			"primary_key_columns": {
+				"type": "string"
+			},
+			"is_composite_key": {
+				"type": "bool"
+			},
+			"bronze_base_path": {
+				"type": "string"
+			}
+		},
+		"variables": {
+			"PipelineReturnStatus": {
+				"type": "String"
+			}
+		},
+		"annotations": []
+	}
 }

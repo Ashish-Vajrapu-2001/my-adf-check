@@ -1,38 +1,38 @@
 {
-    "name": "DS_Parquet_Bronze_Dynamic",
-    "properties": {
-        "linkedServiceName": {
-            "referenceName": "LS_ADLS_Gen2",
-            "type": "LinkedServiceReference"
-        },
-        "parameters": {
-            "sourceSystemName": {
-                "type": "string"
-            },
-            "schemaName": {
-                "type": "string"
-            },
-            "tableName": {
-                "type": "string"
-            }
-        },
-        "annotations": [],
-        "type": "Parquet",
-        "typeProperties": {
-            "location": {
-                "type": "AzureBlobFSLocation",
-                "fileName": {
-                    "value": "@concat(formatDateTime(utcnow(), 'yyyyMMddHHmmss'), '.parquet')",
-                    "type": "Expression"
-                },
-                "folderPath": {
-                    "value": "@concat(dataset().sourceSystemName, '/', dataset().schemaName, '/', dataset().tableName, '/initial_load/')",
-                    "type": "Expression"
-                },
-                "fileSystem": "bronze"
-            },
-            "compressionCodec": "snappy"
-        },
-        "schema": []
-    }
+	"name": "DS_Parquet_Bronze_Dynamic",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "AzureDataLakeStorage1",
+			"type": "LinkedServiceReference"
+		},
+		"parameters": {
+			"sourceSystemName": {
+				"type": "string"
+			},
+			"schemaName": {
+				"type": "string"
+			},
+			"tableName": {
+				"type": "string"
+			}
+		},
+		"annotations": [],
+		"type": "Parquet",
+		"typeProperties": {
+			"location": {
+				"type": "AzureBlobFSLocation",
+				"fileName": {
+					"value": "@concat(formatDateTime(utcnow(), 'yyyyMMddHHmmss'), '.parquet')",
+					"type": "Expression"
+				},
+				"folderPath": {
+					"value": "@concat(dataset().sourceSystemName, '/', dataset().schemaName, '/', dataset().tableName, '/initial_load/')",
+					"type": "Expression"
+				},
+				"fileSystem": "bronze"
+			},
+			"compressionCodec": "snappy"
+		},
+		"schema": []
+	}
 }
